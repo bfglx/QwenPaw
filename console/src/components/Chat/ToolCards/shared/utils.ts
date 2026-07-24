@@ -597,3 +597,101 @@ export function stringifyResult(result: unknown): string {
   if (result != null) return JSON.stringify(result, null, 2);
   return "";
 }
+
+// ---------------------------------------------------------------------------
+// Truncation helpers (UTF-8 byte–aware)
+// ---------------------------------------------------------------------------
+
+/** Preview gate for tool output blocks (UTF-8 bytes). */
+export const TOOL_OUTPUT_PREVIEW_MAX_BYTES = 1000;
+export const TOOL_OUTPUT_PREVIEW_HEAD_BYTES = 400;
+export const TOOL_OUTPUT_PREVIEW_TAIL_BYTES = 400;
+
+export interface TruncateMiddleByUtf8Result {
+  head: string;
+  tail: string;
+  omittedBytes: number;
+  totalBytes: number;
+  truncated: boolean;
+}
+
+const utf8Encoder = new TextEncoder();
+
+function utf8ByteLength(text: string): number {
+  return utf8Encoder.encode(text).byteLength;
+}
+
+/** Take a prefix whose UTF-8 size is at most `maxBytes` (no mid-code-point cuts). */
+export function takeHeadByUtf8Bytes(text: string, maxBytes: number): string {
+  if (maxBytes <= 0 || !text) return "";
+  let result = "";
+  let size = 0;
+  for (const ch of text) {
+    const b = utf8ByteLength(ch);
+    if (size + b > maxBytes) break;
+    result += ch;
+    size += b;
+  }
+  return result;
+}
+
+/** Take a suffix whose UTF-8 size is at most `maxBytes` (no mid-code-point cuts). */
+export function takeTailByUtf8Bytes(text: string, maxBytes: number): string {
+  if (maxBytes <= 0 || !text) return "";
+  const chars = Array.from(text);
+  const kept: string[] = [];
+  let size = 0;
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const b = utf8ByteLength(chars[i]);
+    if (size + b > maxBytes) break;
+    kept.unshift(chars[i]);
+    size += b;
+  }
+  return kept.join("");
+}
+
+/**
+ * If `text` exceeds `maxBytes` UTF-8, keep a head+tail preview and report
+ * how many middle bytes were omitted. Otherwise return the full string.
+ */
+export function truncateMiddleByUtf8Bytes(
+  text: string,
+  maxBytes: number = TOOL_OUTPUT_PREVIEW_MAX_BYTES,
+  headBytes: number = TOOL_OUTPUT_PREVIEW_HEAD_BYTES,
+  tailBytes: number = TOOL_OUTPUT_PREVIEW_TAIL_BYTES,
+): TruncateMiddleByUtf8Result {
+  const totalBytes = utf8ByteLength(text);
+  if (totalBytes <= maxBytes) {
+    return {
+      head: text,
+      tail: "",
+      omittedBytes: 0,
+      totalBytes,
+      truncated: false,
+    };
+  }
+
+  const head = takeHeadByUtf8Bytes(text, headBytes);
+  const tail = takeTailByUtf8Bytes(text, tailBytes);
+  const headLen = utf8ByteLength(head);
+  const tailLen = utf8ByteLength(tail);
+
+  // Degenerate / overlapping slices — show full text.
+  if (headLen + tailLen >= totalBytes) {
+    return {
+      head: text,
+      tail: "",
+      omittedBytes: 0,
+      totalBytes,
+      truncated: false,
+    };
+  }
+
+  return {
+    head,
+    tail,
+    omittedBytes: totalBytes - headLen - tailLen,
+    totalBytes,
+    truncated: true,
+  };
+}

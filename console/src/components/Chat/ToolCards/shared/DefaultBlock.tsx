@@ -9,12 +9,13 @@
  */
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Markdown } from "@agentscope-ai/chat";
-import { CopyOutlined, CheckOutlined } from "@ant-design/icons";
+import { CopyOutlined, CheckOutlined, DownloadOutlined } from "@ant-design/icons";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { copyText } from "@/utils/clipboard";
-import { looksLikeMarkdown } from "./utils";
+import { looksLikeMarkdown, truncateMiddleByUtf8Bytes } from "./utils";
 import styles from "./toolCards.module.less";
 
 export interface DefaultBlockProps {
@@ -54,12 +55,30 @@ const DefaultBlock: React.FC<DefaultBlockProps> = ({
   content,
   copyTitle,
 }) => {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isMarkdown = useMemo(() => looksLikeMarkdown(content), [content]);
+
+  const truncation = useMemo(
+    () => truncateMiddleByUtf8Bytes(content),
+    [content],
+  );
+
+  const displayContent = useMemo(() => {
+    if (!truncation.truncated) return content;
+    const marker = t("tool.omittedBytes", { n: truncation.omittedBytes });
+    return `${truncation.head}\n\n${marker}\n\n${truncation.tail}`;
+  }, [content, truncation, t]);
+
+  // Oversized output skips Markdown/JSON detection — both are costly on long text.
+  const isMarkdown = useMemo(
+    () => !truncation.truncated && looksLikeMarkdown(displayContent),
+    [truncation.truncated, displayContent],
+  );
   const parsedJson = useMemo(
-    () => (isMarkdown ? null : tryParseJson(content)),
-    [content, isMarkdown],
+    () =>
+      truncation.truncated || isMarkdown ? null : tryParseJson(displayContent),
+    [truncation.truncated, isMarkdown, displayContent],
   );
 
   const handleCopy = useCallback(() => {
@@ -72,11 +91,25 @@ const DefaultBlock: React.FC<DefaultBlockProps> = ({
       .catch(() => {});
   }, [content]);
 
+  const handleDownload = useCallback(() => {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tool-output-${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      a.remove();
+    }, 0);
+  }, [content]);
+
   const renderContent = () => {
     if (isMarkdown) {
       return (
         <div className={styles.defaultBlockContentMd}>
-          <Markdown content={content} />
+          <Markdown content={displayContent} />
         </div>
       );
     }
@@ -99,7 +132,7 @@ const DefaultBlock: React.FC<DefaultBlockProps> = ({
         customStyle={highlighterStyle}
         wrapLongLines
       >
-        {content}
+        {displayContent}
       </SyntaxHighlighter>
     );
   };
@@ -108,14 +141,27 @@ const DefaultBlock: React.FC<DefaultBlockProps> = ({
     <div className={styles.defaultBlock}>
       <div className={styles.defaultBlockHeader}>
         <span className={styles.defaultBlockTitle}>{title}</span>
-        <button
-          type="button"
-          className={styles.defaultBlockCopy}
-          onClick={handleCopy}
-          title={copyTitle}
-        >
-          {copied ? <CheckOutlined /> : <CopyOutlined />}
-        </button>
+        <div className={styles.defaultBlockActions}>
+          {truncation.truncated && (
+            <button
+              type="button"
+              className={styles.defaultBlockCopy}
+              onClick={handleDownload}
+              title={t("tool.downloadRaw")}
+              aria-label={t("tool.downloadRaw")}
+            >
+              <DownloadOutlined />
+            </button>
+          )}
+          <button
+            type="button"
+            className={styles.defaultBlockCopy}
+            onClick={handleCopy}
+            title={copyTitle}
+          >
+            {copied ? <CheckOutlined /> : <CopyOutlined />}
+          </button>
+        </div>
       </div>
       {renderContent()}
     </div>

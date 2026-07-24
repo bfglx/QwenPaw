@@ -5,7 +5,7 @@
  * blocks: icon + label on a single line, expandable body underneath.
  */
 
-import React from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ToolCallContent } from "./types";
 import DefaultBlock from "./DefaultBlock";
@@ -45,14 +45,22 @@ const ToolCardShell: React.FC<ToolCardShellProps> = ({
   const inputPreview = inputProgress
     ? `${inputProgress.truncated ? "…\n" : ""}${inputProgress.preview}`
     : "";
+  const [open, setOpen] = useState(false);
 
   return (
     <details
+      open={open}
       className={`${styles.toolCallCompact} ${
         isLoading ? styles.toolCallCompactLoading : ""
       } ${isError ? styles.toolCallCompactError : ""}`}
     >
-      <summary className={styles.toolCallCompactSummary}>
+      <summary
+        className={styles.toolCallCompactSummary}
+        onClick={(e) => {
+          e.preventDefault();
+          setOpen((prev) => !prev);
+        }}
+      >
         {isLoading ? (
           <span className={styles.toolCallSpinner} />
         ) : (
@@ -82,26 +90,30 @@ const ToolCardShell: React.FC<ToolCardShellProps> = ({
           </span>
         )}
       </summary>
-      {isError ? (
+      {open && (
         <>
-          <DefaultBlock
-            title="Input"
-            content={JSON.stringify(content.params, null, 2)}
-          />
-          <DefaultBlock
-            title="Error"
-            content={stringifyResult(content.result)}
-          />
-        </>
-      ) : (
-        <>
-          {isLoading && inputPreview && (
-            <DefaultBlock
-              title={t("tool.rawInputPreview")}
-              content={inputPreview}
-            />
+          {isError ? (
+            <>
+              <DefaultBlock
+                title="Input"
+                content={JSON.stringify(content.params, null, 2)}
+              />
+              <DefaultBlock
+                title="Error"
+                content={stringifyResult(content.result)}
+              />
+            </>
+          ) : (
+            <>
+              {isLoading && inputPreview && (
+                <DefaultBlock
+                  title={t("tool.rawInputPreview")}
+                  content={inputPreview}
+                />
+              )}
+              {children}
+            </>
           )}
-          {children}
         </>
       )}
     </details>

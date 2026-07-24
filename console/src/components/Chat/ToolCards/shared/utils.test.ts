@@ -7,7 +7,12 @@ vi.mock("@/api/modules/chat", () => ({
   },
 }));
 
-import { formatAgentList, formatMemorySearch, getMediaInfo } from "./utils";
+import {
+  formatAgentList,
+  formatMemorySearch,
+  getMediaInfo,
+  truncateMiddleByUtf8Bytes,
+} from "./utils";
 import type { ToolCallContent } from "./types";
 
 const translate = ((key: string) => {
@@ -169,5 +174,49 @@ describe("formatAgentList", () => {
       "| Coder | `agent-1` | Coding agent | ready |",
     );
     expect(formattedResult).not.toContain("|  | `` |  |  |");
+  });
+});
+
+describe("truncateMiddleByUtf8Bytes", () => {
+  it("returns full text when under 1KB", () => {
+    const text = "hello world";
+    const result = truncateMiddleByUtf8Bytes(text);
+    expect(result.truncated).toBe(false);
+    expect(result.head).toBe(text);
+    expect(result.tail).toBe("");
+    expect(result.omittedBytes).toBe(0);
+    expect(result.totalBytes).toBe(
+      new TextEncoder().encode(text).byteLength,
+    );
+  });
+
+  it("omits the middle when over 1KB", () => {
+    const text = "a".repeat(2000);
+    const result = truncateMiddleByUtf8Bytes(text);
+    expect(result.truncated).toBe(true);
+    expect(result.totalBytes).toBe(2000);
+    expect(result.head.length).toBeLessThanOrEqual(400);
+    expect(result.tail.length).toBeLessThanOrEqual(400);
+    expect(result.omittedBytes).toBeGreaterThan(0);
+    expect(result.head + result.tail).not.toBe(text);
+  });
+
+  it("handles empty string", () => {
+    const result = truncateMiddleByUtf8Bytes("");
+    expect(result.truncated).toBe(false);
+    expect(result.head).toBe("");
+    expect(result.totalBytes).toBe(0);
+  });
+
+  it("does not split multi-byte characters", () => {
+    // "你" is 3 UTF-8 bytes; build a string over 1KB
+    const text = "你".repeat(500); // 1500 bytes
+    const result = truncateMiddleByUtf8Bytes(text);
+    expect(result.truncated).toBe(true);
+    // Re-encoding head/tail must match their byte lengths (no replacement chars)
+    expect(new TextEncoder().encode(result.head).byteLength % 3).toBe(0);
+    expect(new TextEncoder().encode(result.tail).byteLength % 3).toBe(0);
+    expect([...result.head].every((c) => c === "你")).toBe(true);
+    expect([...result.tail].every((c) => c === "你")).toBe(true);
   });
 });
